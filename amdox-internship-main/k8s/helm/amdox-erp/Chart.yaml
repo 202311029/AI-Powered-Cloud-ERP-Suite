@@ -1,0 +1,6 @@
+apiVersion: v2
+name: amdox-erp
+description: Helm chart for Amdox Enterprise ERP Suite - 2026 Production Grade
+type: application
+version: 1.0.0
+appVersion: "2026.1"

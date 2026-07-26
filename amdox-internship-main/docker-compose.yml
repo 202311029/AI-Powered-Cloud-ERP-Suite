@@ -1,0 +1,139 @@
+
+# =============================================================================
+# Amdox ERP — Docker Compose (MVP / Local Dev)
+# Runs: Postgres+TimescaleDB, Valkey, Meilisearch, ML service, Backend, Frontend
+# Phase-2 items (k8s, Prometheus, Grafana, Loki, OTel, Keycloak) are NOT here.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 17 with TimescaleDB extension
+  # Single instance for both main data + audit hypertable
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    container_name: amdox-postgres
+    environment:
+      NODE_ENV: development
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: amdox_erp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d amdox_erp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Valkey (OSS Redis fork, BSD-3 license) — BullMQ + cache + token blacklist
+  # ---------------------------------------------------------------------------
+  valkey:
+    image: valkey/valkey:8.1
+    container_name: amdox-valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Meilisearch — full-text search (MIT license)
+  # ---------------------------------------------------------------------------
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: amdox-meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_MASTER_KEY: amdox_meilisearch_master_key_change_me
+      MEILI_ENV: development
+    volumes:
+      - meilisearch_data:/meili_data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # ML / AI Forecasting Service (Python FastAPI + Prophet)
+  # ---------------------------------------------------------------------------
+  ml-service:
+    build:
+      context: ./backend/ml-service
+      dockerfile: Dockerfile
+    container_name: amdox-ml
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # NestJS Backend
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: amdox-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgres://postgres:password123@postgres:5432/amdox_erp?schema=public
+      - REDIS_HOST=valkey
+      - REDIS_PORT=6379
+      - JWT_SECRET=change_me_in_production_use_a_long_random_string_min_64_chars
+      - JWT_ACCESS_EXPIRES_IN=15m
+      - JWT_REFRESH_EXPIRES_IN=7d
+      - PORT=5000
+      - NODE_ENV=production
+      - CORS_ORIGIN=http://localhost:3000
+      - MEILISEARCH_HOST=http://meilisearch:7700
+      - MEILISEARCH_MASTER_KEY=amdox_meilisearch_master_key_change_me
+      - ML_SERVICE_URL=http://ml-service:8000
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Next.js Frontend
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: amdox-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  valkey_data:
+  meilisearch_data:

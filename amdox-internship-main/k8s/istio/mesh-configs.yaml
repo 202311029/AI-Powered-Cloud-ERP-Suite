@@ -1,0 +1,41 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: amdox-erp
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: amdox-gateway
+  namespace: amdox-erp
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "erp.amdox.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: frontend-vs
+  namespace: amdox-erp
+spec:
+  hosts:
+  - "erp.amdox.com"
+  gateways:
+  - amdox-gateway
+  http:
+  - route:
+    - destination:
+        host: frontend-service
+        port:
+          number: 3000
